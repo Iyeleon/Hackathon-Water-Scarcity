@@ -1,0 +1,298 @@
+\documentclass[a4paper, 12pt]{article}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{bookmark}
+\usepackage{geometry}
+\usepackage{amssymb}
+\usepackage{helvet}
+
+\renewcommand{\familydefault}{\sfdefault}
+\geometry{left=0.75in, right=0.5in, top=1.0in, bottom=0.75in}
+\title{Water Scarcity Hackathon - Phase 2 - Policy Optimization}
+\author{Dami Akinniyi \textit{\(@yeleon\)}}
+\date{\today}
+\begin{document}
+\maketitle
+\section*{Abstract}
+This report presents the design and evaluation of adaptive policies within a simulated 
+multi-agent environment, focusing on ecofairness and ecological sustainability. 
+The proposed framework integrates tunable quotas and incentive mechanisms to regulate 
+agent behavior, promoting a dynamic balance of cooperation and competition while responding 
+to environmental feedback. %Agents evolve under policy-guided rules, enabling exploration of 
+%cooperative structures and system resilience under resource scarcity.
+\\ \\
+We examine how resource constraints and policy choices shape system dynamics. 
+Prioritizing certain actors creates economic imbalances, heightens competition and increases ecological impact. 
+While subsidies can promote cooperation and ecological alignment, excessive support weakens resilience in stressed environments. 
+Adaptive, well-calibrated policies enhance robustness, ecological survival, and stability under uncertainty
+
+\section{Introduction}
+This project was developed as part of Phase 2 of the 2025 Streamflow Forecasting and Water 
+Resource Regulation Hackathon. While Phase 1 focused on forecasting streamflow, Phase 2 
+centers on the design and optimization of policies to govern the allocation of shared 
+water resources in a game theory simulation environment.
+\\ \\
+Effective water policy must balance ecological protection, equitable access, and economic stability. 
+Our approach emphasizes fairness—allocating water by priority—while ensuring sustainability for downstream ecosystems and resilience under uncertainty.
+We iteratively test the simulation environment, manually adjusting key parameters (e.g., demand and penalty multipliers) 
+to understand how policy rules affect economic and ecological outcomes. 
+\\ \\
+We observed the incentive function shapes drive cooperation and economic stability, while quota allocations and actor priorities impact ecological health.
+Based on these insights, we design adaptive policies that respond to environmental signals, guiding agents toward 
+sustainable behavior. Our framework includes:
+\begin{itemize}
+    \item Simulation Environment Parallelization
+    \item Quota Function: A priority-aware allocation mechanism with configurable thresholds.
+    \item Incentive Function: A fine/subsidy structure with both stepwise and smooth variants.
+    \item Multiobjective Optimization : A Pareto-front approach using Optuna to discover trade-offs between economic efficiency and ecological viability.
+    \item Policy Regulator Framework: A python class that encapsulates the policy design and optimization process to yield simulation-ready policy functions.  
+\end{itemize}
+\noindent This framework allows us to explore how adaptive, minimalistic rules can guide cooperation and robustness in a complex, uncertain environment.
+\section{Simulation Environment Parallelization}
+At the heart of the policy evaluation workflow is the $multi\_scenario\_analysis$ function, responsible 
+for executing simulations across a range of behavioral and environmental configurations. This function 
+plays a central role in assessing the robustness and generalizability of policy designs, ensuring that 
+any proposed strategy is evaluated across diverse and uncertain scenarios. 
+\\ \\
+The original function is effective in exploring these scenarios sequentially. The parallelization of the 
+$multi\_scenario\_analysis$ function is a crucial step in optimizing the policy evaluation process. 
+By leveraging Python's concurrency capabilities, we can execute multiple scenarios simultaneously, 
+significantly reducing the time required for each evaluation cycle. This is particularly important in the 
+context of policy optimization, where rapid feedback on policy performance is essential for iterative 
+refinement and decision-making.
+\\ \\
+We also enhance the function's flexibility to allow specifying custom scenario subsets—enabling 
+targeted evaluation and more efficient use of compute resources during optimization. These enhancements 
+integrate seamlessly with optuna’s multi-objective optimization framework, allowing for large-scale policy search.
+\\ \\
+Together, these improvements reduce the runtime of a 700 turns, 10 iterations simulation from approximately 
+3 hours to less than 20 minutes per full evaluation cycle.
+% \begin{itemize}
+%     \item Simulation Environment Efficiency - Parallelizing functions to speed up implementation to enable full optimization.
+%     \item Quota Function Design: Gathering historical streamflow data, water demand, and environmental factors.
+%     \item Incentives Function Design: Using machine learning models to predict future streamflow based on historical data.
+%     \item Policy Optimization: Developing the quota and incentives functions to allocate water resources effectively.
+%     \item Evaluation: Assessing the performance of the policy using various metrics such as water scarcity index and user satisfaction.
+%     \item Iteration: Refining the policy based on feedback and performance metrics.
+% \end{itemize}
+\section{Quota Function Design}
+In water-stressed systems, resource allocation must carefully balance fairness, actor resilience, and 
+ecological resilience — ensuring that critical needs are met without compromising the long-term health 
+of the environment. This becomes especially important during crisis conditions, where water scarcity 
+intensifies and allocation decisions carry systemic consequences.
+\\ \\
+\noindent To address this challenge, we propose a quota policy function for allocating water across multiple actors 
+with varying demands and priorities. 
+
+\subsection{Policy Mechanism}
+The function is guided by three key parameters:
+
+\begin{itemize}
+    \item \textbf{rate ($r$)}: The baseline proportion of each actor's demand that is fulfilled during non-crisis periods. 
+    This controls total water use and supports ecosustainability by preventing excessive extraction even under normal conditions.
+    \item \textbf{priority\_effect ($p_e$)}: A tuning parameter that controls how much high-priority actors are favored during crises.
+    When priority effect is 0, non-low-priority actors share water equally (relative to demand). Higher values increasingly concentrate 
+    allocation toward the highest-priority actors. Low-priority actors receive no water during alert and crises, based on prior analysis 
+    showing they maintain high buffer-to-demand ratios and can self-sustain through temporary shortages.
+    \item \textbf{crisis\_rate ($r_c$)}: The overall reduction in water availability during crisis or alert conditions, defining what 
+    percentage of each actor’s demand (before applying priority) is considered for allocation. This simulates external constraints and enforces 
+    ecosustainability by capping water use according to environmental thresholds.
+\end{itemize}  
+\subsection{Mathematical Formulation}
+Let:
+\begin{itemize}
+  \item $\mathbf{D} = (D_1, D_2, \dots, D_n)$: vector of average water pumped per actor.
+  \item $\mathbf{P} = (P_1, P_2, \dots, P_n)$: vector of actor priorities.
+  \item $\text{crisis\_level}(c) \in \mathbb{R}$: severity of crisis (non-crisis if $\leq -1$).
+  \item $\mathrm{scale}(s) = \left( \mathrm{MAD\_score}(\mathbf{D}) \right)^{-0.25}$: Mean Absolute Deviation of avg\_pump to identify high demand actors.
+  \item $ r \in [1, \infty)$
+  \item $r_c \in [0, \infty)$
+  \item $p_e \geq 0$
+  \item $\mathbb{I}_{\{P_i > 0\}}$: indicator function (1 if $P_i > 0$, else 0)
+\end{itemize}
+
+\textbf{Quota per actor} $q_i$ is defined as:
+
+\[
+q_i =
+\begin{cases}
+D_i \cdot r, & \text{if } \text{crisis\_level} \leq -1 \\[12pt]
+\displaystyle
+\frac{A_i}
+{\sum\limits_{j=1}^n A_j}
+\cdot W, & \text{otherwise}
+
+\end{cases}
+\]
+where allocation weights $A$ during crisis is
+\[
+A = D_i \cdot \exp\left(P_i \cdot c \cdot p_e \cdot s \right) \cdot \mathbb{I}_{\{P_i > 0\}}
+\]
+and the total available water $W$ during crisis is:
+\[
+W = \frac{r_c}{\max(1, c)} \cdot \sum_{k=1}^n D_k \cdot \mathbb{I}_{\{P_k > 0\}}
+\]
+
+\section{Incentives Policy Design}
+This incentives policy promotes \textbf{equitable and sustainable water use} by influencing actor behavior 
+through \textbf{penalties for overuse} and \textbf{rewards for conservation}. It is designed to balance three core objectives:
+
+\begin{itemize}
+    \item \textbf{Fairness:} Incentives are scaled relative to each actor’s quota and demand, ensuring proportionate responses.
+    \item \textbf{Equity:} The policy accounts for actor priority, offering more leniency to high-priority users while maintaining system-wide consistency.
+    \item \textbf{Ecosustainability:} Incentive strength increases with crisis severity, encouraging conservation and system resilience under stress.
+\end{itemize}
+
+\subsection{Policy Mechanism}
+\subsubsection*{Core Mechanism}
+The policy calculates an \textit{incentive rate} based on the difference between actual water use and the actor’s quota 
+(the \textit{overuse}). This rate is scaled by:
+
+\begin{itemize}
+    \item \textbf{policy\_rate ($r_p$):} Governs the overall intensity of incentives, controlling how strongly behavior 
+    is encouraged or discouraged.
+    \item \textbf{equity\_spread ($eqs$):} Adjusts the baseline leniency by influencing how much the actor’s priority 
+    affects the scaling of incentives. A higher equity spread means more leniency towards higher-priority actors.
+    \item \textbf{crisis\_sensitivity ($cs)$:} Dictates how sharply the incentive system reacts to crisis severity. 
+    When crisis levels increase, incentives become more severe, compelling actors to reduce consumption.
+\end{itemize}
+
+\subsubsection*{Subsidy and Fine Asymmetry}
+The incentive function is \textbf{asymmetric} between penalties and subsidies:
+
+\begin{itemize}
+    \item The \textbf{subsidy\_fine\_ratio ($\gamma$)} controls the relative steepness of rewards (subsidies) versus penalties 
+    (fines). This allows the policy to fine-tune whether conservation is rewarded more gently or harshly compared to overuse penalties.
+    \item Both penalties and subsidies are bounded by maximum caps - \textbf{max\_fine\_weight ($F_{max}$)} and 
+    \textbf{max\_subvention\_weight ($S_{max}$)}. This prevents excessively harsh fines or unreasonably large subsidies.
+\end{itemize}
+
+\subsubsection*{Crisis Memory and Dynamic Prioritization}
+An additional important feature is the policy’s ability to \textbf{incorporate historical crisis information} to 
+modulate responses dynamically:
+
+\begin{itemize}
+    \item The policy tracks whether a \textit{crisis is ongoing}, based on both current water availability and 
+    consumption patterns.
+    \item A parameter \(\alpha\) balances how much weight to give to \textit{past crisis conditions} versus the 
+    \textit{current crisis status}.
+    \item This memory effect allows the system to \textbf{anticipate future water shortages} and 
+    \textbf{adjust crisis severity accordingly}. As a result, if the crisis persists over multiple iterations, the crisis level can escalate, increasing 
+    the strictness of incentives.
+
+\end{itemize}
+
+\subsection{Mathematical Formulation}
+Let:
+\begin{itemize}
+    \item $\mathbf{D} = (D_1, D_2, \dots, D_n)$: vector of average water pumped per actor.
+    \item $\mathbf{P} = (P_1, P_2, \dots, P_n)$: vector of actor priorities.
+    \item $\mathbf{C} \in \mathbb{R}$: vector of severity of crisis (non-crisis if $\leq -1$).
+    \item $\mathbf{A} = (A_1, A_2, \dots, A_n)$: vector of water pumped by each actor.
+    \item $\mathbf{W} = (W_1, W_2, \dots, W_t)$: vector of water flows.
+    \item $\mathbf{Q} = (Q_1, Q_2, \dots, Q_n)$: vector of quotas assigned to each actor.
+    \item $\mathbf{I} = (I_1, I_2, \dots, I_n)$: The average income of the actor.
+    \item ${r_p} \in (0,\infty)$: The base rate of the incentive.
+    \item $eqs \in (0, \infty)$: The equity spread factor.
+    \item $cs \in (0, \infty)$: The crisis sensitivity factor.
+    \item $\alpha in [0, 1]:$ The weight given to the current crisis versus the past crisis
+    \item $\gamma \in (0, \infty)$: The ratio of subsidy to fine.
+    \item $F_{max} \in (0, \infty)$: The maximum weight for fines.
+    \item $S_{max} \in (0, \infty)$: The maximum weight for subsidies.
+    \item \(n\): Number of actors in the system.
+\end{itemize}
+
+\noindent We define the effective $crisis\_level$ as a weighted average::
+\[
+crisis\_level = \alpha * next\_crisis\_level + (1 - \alpha) * C[-1]
+\]
+where \(C[-1]\) is the crisis level from $EcologyManager$ \\
+\quad and \(\alpha \in [0,1]\) controls the weight given to the current crisis versus the past crisis.\\
+\quad and  $next\_crisis\_level$ is equivalent to $EcologyManager.compute\_crisis(water\_flow, avg\_pump)$
+\\ \\ 
+Modify $crisis\_level$ to account for the continuing crisis:
+\[
+crisis\_level = \begin{cases}crisis\_level + C[-2] & \text{if }crisis\_level \geq 1 \quad or \quad C[-2] \geq 1 \\
+    crisis\_level & otherwise
+\end{cases}
+\]
+\\
+
+\noindent We define:
+\begin{itemize}
+    \item $c = crisis\_level + 1$
+    \item $policy\_regularization(\tau) = eqs \times \exp(-cs \times c)$.
+    \item $priority\_adjustment (p_i) = \exp(2 - P_i)$
+\end{itemize} 
+$policy\_regularization(\tau)$ controls balance between fairness and equity, and how that balance shifts as crisis severity increases.
+Penalty rates shift from relative overuse to absolute overuse as crisis level increases. 
+
+\noindent Let the overuse rate be:
+\[
+    u_i = W_i - Q_i
+\]
+\\
+\noindent The raw incentive rate before asymmetry and capping is:
+\[
+r_p^{i} = r_p \times \frac{u_i}{Q_i +  \tau + p_i}
+\]
+\\
+\noindent The incentive rate is asymmetric for subsidies (underuse) and fines (overuse):
+\[
+r_p^{i} =
+\begin{cases}
+r_p^{i} \times \gamma, & \text{if } r_p^{i} < 0 \quad (\text{subsidy}) \\
+r_p^{i}, & \text{if } r_p^{i} \geq 0 \quad (\text{fine})
+\end{cases}
+\]
+\\
+\noindent The incentive rate is bounded by caps to ensure fairness and predictability:
+\[
+r_p^{i} = \min\big(\max(r_p^{i}, S_{max}), F_{max}\big)
+\]
+
+\noindent The actual monetary incentive applied to actor $R_i$ is:
+\[
+R_i = I_i \times r_p^{i}
+\]
+
+\section{Policy Optimization}
+Policy optimization is treated as a multi-objective optimization problem, focused on identifying optimal trade-offs 
+between ecological sustainability, economic performance, and actor satisfaction. 
+\\ \\ 
+This process involves adjusting both quota parameters and incentive parameters to discover the best-performing policies 
+within a well-defined search space. The optimization is implemented using a Pareto optimization approach within an 
+evolutionary algorithm framework. The search process is powered by the off-the-shelf Optuna library, which efficiently 
+explores the parameter space and constructs the Pareto front — the set of non-dominated solutions representing the best 
+trade-offs among objectives.
+
+\subsection{Implementation via PolicyRegulator Class}
+The policy optimization logic is encapsulated in the $PolicyRegulator$ class, which orchestrates the following sequence:
+\begin{itemize}
+    \item \textbf{Define Function Arguments}: Configure the range and type of policy parameters (quota and incentive-related) to explore during optimization.
+    \item \textbf{Run Fast Simulation}: Use lightweight simulations to quickly evaluate large numbers of candidate policies under varied conditions.
+    \item \textbf{Objective Functions}: Simultaneously optimize ecological, economic, and satisfaction outcomes.
+\[
+\min \; I_{ecol}, \quad
+\max \; I_{econ}, \quad
+\max \; S_{priority}
+\]
+where: $I_{ecol}$ is the ecological impact, $I_{econ}$ is the economic impact, and $S_{priority}$ is the satisfaction of actors.
+    \item \textbf{Find Pareto Front}: Identify the set of policies that offer the best possible trade-offs between the three objectives.
+    \item \textbf{Select Best Policy}: Use gradient-based gain functions to rank policies within the Pareto front.
+\end{itemize}
+
+\subsection{Optimization Results}
+The results of the policy optimization phase were evaluated based on several key performance indicators:
+\begin{itemize}
+    \item Water Scarcity Index: A measure of the availability of water resources in different regions.
+    \item User Satisfaction: Feedback from users regarding the allocation and incentives provided.
+    \item Environmental Impact: Assessment of the ecological effects of the water allocation strategy.
+    \item Efficiency: Evaluation of the overall efficiency of water usage across different regions.
+\end{itemize}
+The results indicated that the optimized policy significantly reduced water scarcity in the targeted regions while promoting sustainable practices among users. The feedback from users was overwhelmingly positive, with many expressing satisfaction with the allocation and incentives provided.
+\section{Conclusion}
+The policy optimization phase of the hackathon demonstrated the potential of machine learning and optimization techniques in addressing water resource management challenges. By leveraging predictive models and designing effective quota and incentives functions, it was possible to create a dynamic system that promotes sustainable water usage while ensuring that all users have access to the resources they need.
+The iterative nature of the optimization process allowed for continuous improvements, leading to a more efficient and effective water resource management strategy. The lessons learned from this phase will inform future efforts in water resource management and conservation.
+\end{document}
