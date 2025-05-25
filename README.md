@@ -45,5 +45,5 @@ Open multi_scenarios.ipynb for comparative visualizations and advanced analysis.
 
 # How to run
 run policy_optimization.ipynb to optimize policy
-run single_scenario_notebooks_* to see effect of policies in single scenario environment
-run multi_scenarios_notebook_* to see effect of designed polices in multi-scenario environment
+run multi_scenarios_trial_33_best.ipynb to to generate quota function and run simulation across multiple scenarios
+run single_scenario* to see effect of policies in single scenario environment
