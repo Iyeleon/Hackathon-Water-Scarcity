@@ -44,6 +44,6 @@ Open multi_scenarios.ipynb for comparative visualizations and advanced analysis.
     └── README.md                  # Project overview and usage guide
 
 # How to run
-run policy_optimization.ipynb to optimize policy
-run multi_scenarios_trial_33_best.ipynb to to generate quota function and run simulation across multiple scenarios
-run single_scenario* to see effect of policies in single scenario environment
+- run policy_optimization.ipynb to optimize policy (takes ~8 hours to run). Change optimize to `True` to run. if False, skips training. Loads preoptimized `PolicyRegulator`
+run multi_scenarios_trial_33_best.ipynb to generate quota and incentives function and run simulation across multiple scenarios
+run single_scenario_* to see effect of policies in single scenario environment
