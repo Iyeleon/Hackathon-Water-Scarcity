@@ -4,3 +4,4 @@ matplotlib==3.9.2
 seaborn==0.13.2
 PyYAML==6.0.2
 scikit-learn==1.6.1
+optuna==4.0.0
