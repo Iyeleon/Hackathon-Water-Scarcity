@@ -58,7 +58,7 @@ class BasePolicyRegulator(ABC):
         self.incentives_params = incentives_params
         self.simulation_params = simulation_params
         self.name = name or f'{sampler.__class__.__name__}'
-        self.directions = ['minimize', 'maximize', 'maximize']
+        self.directions = ['minimize', 'maximize']#, 'maximize']
         self.obj_names = ['Ecological Impact', 'Economic Impact', 'Satisfaction']
         self.optimized = False
 
@@ -84,6 +84,7 @@ class PolicyRegulator(BasePolicyRegulator):
             # else, use default from the available samplers
             self.sampler = sampler or self.samplers['ngsa_2']
         self.study = None
+        self.cooperation_rate = []
         
     def parse_policy_params(self, trial, policy_params):
         hyp = {}
@@ -122,9 +123,17 @@ class PolicyRegulator(BasePolicyRegulator):
             raw_ecological_impact = results.raw_ecological_impact.mean()
             cooperation_percentage = results.cooperation_percentage.mean()
             priority_ok = results.priority_ok.mean()
+            
+            trial.set_user_attr('cooperation', cooperation_percentage)
+            trial.set_user_attr('satisfaction', priority_ok)
+
+            penalty = (1 - priority_ok) * 5
+            ecological_impact += penalty
+            economic_impact -= penalty
+
     
             # return results
-            return ecological_impact, economic_impact, priority_ok
+            return ecological_impact, economic_impact#, priority_ok
         return objective
         
     def optimize_objective(self, n_trials = 50, timeout = 900):
@@ -142,26 +151,6 @@ class PolicyRegulator(BasePolicyRegulator):
 
     def _check_is_optimized(self):
         assert self.optimized, 'Objective is not optimized. Call model.optimize_objective()'
-
-    def plot_visualization(self, viz_type = 'pareto', fig_kwargs = None, **kwargs):
-        self._check_is_optimized()
-        match viz_type:
-            case 'pareto':
-                fig = optuna.visualization.plot_pareto_front(study = self.study, target_names = self.obj_names, **kwargs)
-            case 'hypervolume':
-                fig = optuna.visualization.plot_hypervolume_history(study = self.study, **kwargs)
-            case 'edf':
-                fig = optuna.visualization.plot_edf(study = self.study, **kwargs)
-            case 'hyp_importances':
-                fig = optuna.visualization.plot_hyperparameter_importances(study = self.study, **kwargs)
-            case 'parallel_coords':
-                fig = optuna.visualization.plot_parallel_coordinate(study = self.study, **kwargs)
-            case 'slice':
-                fig = optuna.visualization.plot_slice(study = self.study, **kwargs)
-        if fig_kwargs is not None:
-            fig.update_layout(**fig_kwargs)
-        show(fig, renderer = 'notebook') 
-        # fig.show()
 
     def _get_is_dominated(self, candidate, population):
         for other in population:
@@ -191,7 +180,6 @@ class PolicyRegulator(BasePolicyRegulator):
                 return True  # candidate is dominated
     
         return False  # candidate is not dominated
-
 
     def _get_satisfactory_best_trials(self, satisfaction_threshold = 0.99):
         best_trials = self.study.trials
@@ -227,10 +215,10 @@ class PolicyRegulator(BasePolicyRegulator):
     
         # Plot Pareto front
         pf = list(zip(*pareto_points))
-        im = plt.scatter(pf[0], pf[1], c = pf[2], s = 50, cmap = 'Reds', edgecolors = '#ffffff', linewidth = 0.75, vmin = 0.0, vmax = 1, label='Pareto Front')
+        im = plt.scatter(pf[0], pf[1], s = 50, cmap = 'Reds', edgecolors = '#ffffff', linewidth = 0.75, vmin = 0.0, vmax = 1, label='Pareto Front')#, c = pf[2],)
         plt.plot(pf[0], pf[1], linestyle = '--', linewidth = 1.0)
-        cbar = fig.colorbar(im)
-        cbar.ax.set_ylabel('Satisfaction level')
+        # cbar = fig.colorbar(im)
+        # cbar.ax.set_ylabel('Satisfaction level')
         
     
         plt.xlabel(self.obj_names[0])
@@ -238,19 +226,25 @@ class PolicyRegulator(BasePolicyRegulator):
         plt.title(f'{self.name}_Pareto Front')
 
     def find_best_pareto_elbow_angle(self, satisfaction_threshold = 0.99, plot=False):
-        # Get Pareto trials meeting satisfaction threshold
-        all_pareto_trials = self._get_satisfactory_best_trials(satisfaction_threshold)
-        all_values = np.array([t.values[:2] for t in all_pareto_trials])
+        # # Get Pareto trials meeting satisfaction threshold
+        # all_pareto_trials = self._get_satisfactory_best_trials(satisfaction_threshold)
+        # all_values = np.array([t.values[:2] for t in all_pareto_trials])
     
-        # Filter out dominated points
-        is_dominated = [self._get_is_dominated(v, all_values) for v in all_values]
-        pareto_trials = [all_pareto_trials[i] for i in range(len(is_dominated)) if not is_dominated[i]]
-        print(is_dominated)
-        values = all_values[~np.array(is_dominated)]
+        # # Filter out dominated points
+        # is_dominated = [self._get_is_dominated(v, all_values) for v in all_values]
+        # pareto_trials = [all_pareto_trials[i] for i in range(len(is_dominated)) if not is_dominated[i]]
+        # values = all_values[~np.array(is_dominated)]
+        
+        pareto_trials = self.study.best_trials
+        values = np.array([t.values[:2] for t in pareto_trials])
     
         # Manual fallback if too few points
+        if len(pareto_trials) == 1:
+            print("Only one Pareto-optimal trials found. Returning single solution.")
+            return pareto_trials[0]
+            
         if len(pareto_trials) <= 2:
-            print("Only two or fewer Pareto-optimal trials found. Manual selection required.")
+            print("Only two Pareto-optimal trials found. Manual selection required.")
             return pareto_trials  # Let caller decide
                 
         # sort values by first objective
@@ -266,13 +260,15 @@ class PolicyRegulator(BasePolicyRegulator):
         values_norm = (values - values.min(axis=0)) / (values.max(axis=0) - values.min(axis=0) + 1e-8)
 
         # compute finite differences
-        diffs = np.diff(values_norm, axis=0)
+        diffs = np.diff(values_norm, prepend = 0, append = 0, axis=0)
         norms = np.linalg.norm(diffs, axis=1, keepdims=True) + 1e-8
         unit_vecs = diffs / norms
+
 
         # Compute angles between successive gradient vectors
         dot_products = np.sum(unit_vecs[:-1] * unit_vecs[1:], axis=1)
         angles = np.arccos(np.clip(dot_products, -1.0, 1.0))  # Angle in radians
+
 
         # Elbow is point with largest direction change
         elbow_idx = np.argmax(angles) + 1  # +1 to align with the middle point of 3
@@ -290,18 +286,25 @@ class PolicyRegulator(BasePolicyRegulator):
         return pareto_trials[elbow_idx]
         
     def find_best_pareto_elbow_gradient(self, satisfaction_threshold=0.99, plot=False):    
-        # Get Pareto trials meeting satisfaction threshold
-        all_pareto_trials = self._get_satisfactory_best_trials(satisfaction_threshold)
-        all_values = np.array([t.values[:2] for t in all_pareto_trials])
+        # # Get Pareto trials meeting satisfaction threshold
+        # all_pareto_trials = self._get_satisfactory_best_trials(satisfaction_threshold)
+        # all_values = np.array([t.values[:2] for t in all_pareto_trials])
     
-        # Filter out dominated points
-        is_dominated = [self._get_is_dominated(v, all_values) for v in all_values]
-        pareto_trials = [all_pareto_trials[i] for i in range(len(is_dominated)) if not is_dominated[i]]
-        values = all_values[~np.array(is_dominated)]
+        # # Filter out dominated points
+        # is_dominated = [self._get_is_dominated(v, all_values) for v in all_values]
+        # pareto_trials = [all_pareto_trials[i] for i in range(len(is_dominated)) if not is_dominated[i]]
+        # values = all_values[~np.array(is_dominated)]
+
+        pareto_trials = self.study.best_trials
+        values = np.array([t.values[:2] for t in pareto_trials])
     
         # Manual fallback if too few points
+        if len(pareto_trials) == 1:
+            print("Only one Pareto-optimal trials found. Returning single solution.")
+            return pareto_trials[0]
+            
         if len(pareto_trials) <= 2:
-            print("Only two or fewer Pareto-optimal trials found. Manual selection required.")
+            print("Only two Pareto-optimal trials found. Manual selection required.")
             return pareto_trials  # Let caller decide
     
         # Sort points by first objective
@@ -316,7 +319,7 @@ class PolicyRegulator(BasePolicyRegulator):
         values_norm = (values - values.min(axis=0)) / (values.max(axis=0) - values.min(axis=0) + 1e-8)
     
         # Compute gradients (L2 norms of differences)
-        diffs = np.diff(values_norm, axis=0)
+        diffs = np.diff(values_norm, prepend = 0, append = 0, axis=0)
         gradients = diffs[:, 1] / (diffs[:, 0] + 1e-8)
         elbow_idx = np.argmin(gradients)
         # note that elbow idx is already pareto idx - 1
@@ -327,6 +330,7 @@ class PolicyRegulator(BasePolicyRegulator):
         return pareto_trials[elbow_idx]
     
     def _plot_pareto_optimization(self, values_norm, angles, elbow_idx, method = 'Gradient'):
+        print(angles)
         
         fig, ax = plt.subplots(1, 2, figsize=(10, 5))
         
@@ -338,7 +342,7 @@ class PolicyRegulator(BasePolicyRegulator):
         ax[0].set_title("Pareto Front with Elbow")
         ax[0].legend()
 
-        # Plot angle changes
+        # Plot changes
         ax[1].plot(range(1, len(angles)+1), angles, marker='o')
         ax[1].axvline(elbow_idx + 1, color='red', linestyle='--', label="Elbow")
         ax[1].set_xlabel("Index")
@@ -349,8 +353,8 @@ class PolicyRegulator(BasePolicyRegulator):
         plt.tight_layout()
         plt.show()
 
-    def plot_hypervolume(self, figsize = None):
-        ax = optuna.visualization.matplotlib.plot_hypervolume_history(self.study, [1.0, 0.0, 0.0])
+    def plot_hypervolume(self, figsize = None, save_path = None):
+        ax = optuna.visualization.matplotlib.plot_hypervolume_history(self.study, [1.0, 0.0])#, 0.0])
         if figsize:
             fig = ax.get_figure()
             fig.set_size_inches(figsize)
@@ -359,8 +363,10 @@ class PolicyRegulator(BasePolicyRegulator):
         for child in ax.get_children():
             if isinstance(child, plt.matplotlib.lines.Line2D):
                 child.set_color('red') 
+        if save_path is not None:
+            plt.savefig(save_path)
 
-    def plot_feature_importances(self, importance_type="fanova", target = None):
+    def plot_feature_importances(self, importance_type="fanova", target = None, save_path = None):
         # compute parameter importances
         importances = optuna.importance.get_param_importances(self.study, evaluator=importance_type, target = target)
     
@@ -378,6 +384,8 @@ class PolicyRegulator(BasePolicyRegulator):
         plt.title(f"Hyperparameter Importances ({importance_type})")
         plt.gca().invert_yaxis()
         plt.tight_layout()
+        if save_path is not None:
+            plt.savefig(save_path)
         plt.show()
 
     def save(self, save_path):
@@ -385,14 +393,16 @@ class PolicyRegulator(BasePolicyRegulator):
         # save trial
         with open(os.path.join(save_path, 'study.pkl'), 'wb') as file:
             pickle.dump(self.study, file)
+
+        # TO-DO fix function pickling error that happens occassionally
+        # TEMP FIX - save policy reg without functions, 
+        # # pickle quota function    
+        # with open(os.path.join(save_path, 'quota_fn.pkl'), 'wb') as file:
+        #      pickle.dump(self.quota_policy, file)
             
-        # pickle quota function    
-        with open(os.path.join(save_path, 'quota_fn.pkl'), 'wb') as file:
-             pickle.dump(self.quota_policy, file)
-            
-        # pickle incentives function
-        with open(os.path.join(save_path, 'incentives_fn.pkl'), 'wb') as file:
-             pickle.dump(self.incentives_policy, file)
+        # # pickle incentives function
+        # with open(os.path.join(save_path, 'incentives_fn.pkl'), 'wb') as file:
+        #      pickle.dump(self.incentives_policy, file)
         
         # save metadata       
         metadata = {
@@ -405,13 +415,15 @@ class PolicyRegulator(BasePolicyRegulator):
             json.dump(metadata, file)
 
     @classmethod
-    def from_preoptimized(cls, load_path):
+    def from_preoptimized(cls, load_path, quota_policy = None, incentives_policy = None):
+        # TO-DO fix function pickling error that happens occassionally
+        # TEMP FIX - load policy reg without functions, supply policy functions after loading,
          
-        with open(os.path.join(load_path, 'quota_fn.pkl'), 'rb') as file:
-            quota_policy = pickle.load(file)
+        # with open(os.path.join(load_path, 'quota_fn.pkl'), 'rb') as file:
+        #     quota_policy = pickle.load(file)
 
-        with open(os.path.join(load_path, 'incentives_fn.pkl'), 'rb') as file:
-            incentives_policy = pickle.load(file)
+        # with open(os.path.join(load_path, 'incentives_fn.pkl'), 'rb') as file:
+        #     incentives_policy = pickle.load(file)
 
         with open(os.path.join(load_path, 'study.pkl'), 'rb') as file:
             study = pickle.load(file)
@@ -424,7 +436,7 @@ class PolicyRegulator(BasePolicyRegulator):
 
         model.optimized = True
         return model
-
+    
     def get_best_policy_functions(self, params):
         # parse params
         quota_params = {}

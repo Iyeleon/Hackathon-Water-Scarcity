@@ -6,6 +6,7 @@
 \usepackage{geometry}
 \usepackage{amssymb}
 \usepackage{helvet}
+\usepackage{subcaption}
 
 \renewcommand{\familydefault}{\sfdefault}
 \geometry{left=0.75in, right=0.5in, top=1.0in, bottom=0.75in}
@@ -276,7 +277,7 @@ The policy optimization logic is encapsulated in the $PolicyRegulator$ class, wh
 \[
 \min \; I_{ecol}, \quad
 \max \; I_{econ}, \quad
-\max \; S_{priority}
+1 - S_{priority} \leq 0
 \]
 where: $I_{ecol}$ is the ecological impact, $I_{econ}$ is the economic impact, and $S_{priority}$ is the satisfaction of actors.
     \item \textbf{Find Pareto Front}: Identify the set of policies that offer the best possible trade-offs between the three objectives.
@@ -284,15 +285,94 @@ where: $I_{ecol}$ is the ecological impact, $I_{econ}$ is the economic impact, a
 \end{itemize}
 
 \subsection{Optimization Results}
-The results of the policy optimization phase were evaluated based on several key performance indicators:
-\begin{itemize}
-    \item Water Scarcity Index: A measure of the availability of water resources in different regions.
-    \item User Satisfaction: Feedback from users regarding the allocation and incentives provided.
-    \item Environmental Impact: Assessment of the ecological effects of the water allocation strategy.
-    \item Efficiency: Evaluation of the overall efficiency of water usage across different regions.
-\end{itemize}
-The results indicated that the optimized policy significantly reduced water scarcity in the targeted regions while promoting sustainable practices among users. The feedback from users was overwhelmingly positive, with many expressing satisfaction with the allocation and incentives provided.
+
+We applied the Optuna-enabled NSGA-II evolutionary algorithm for multi-objective optimization, executing 60 trials with an initial population size of 15 while keeping all other parameters at their default settings. Convergence was observed around the 35th trial, after which improvements in the objective space plateaued.
+
+Notably, the final run of the optimization yielded a Pareto front consisting of a single non-dominated solution. This outcome is atypical, as previous runs generally produced multiple non-dominated solutions. Despite this, the resulting solution was found to be robust and well-aligned with the objectives, clearly illustrating the trade-offs inherent in the problem formulation. The emergence of a singular dominant solution suggests that, under the given parameterization, a strong compromise exists between competing objectives, and further diversification may require broader hyperparameter exploration or relaxed constraint settings.
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1.0\textwidth]{./assets/images/hypervolume.png}
+    \caption{Hypervolume history over optimization trials. The plot illustrates the convergence behavior of the NSGA-II algorithm, with hypervolume improving steadily and stabilizing around trial 35. This indicates a progressive exploration of the objective space and eventual convergence toward a robust Pareto-optimal solution.}
+    \label{fig:hypervolume_history}
+\end{figure}
+
+\subsubsection{Observations}
+\begin{figure}
+    \centering
+    \includegraphics[width=0.7\textwidth]{./assets/images/objectives_correlation.png}
+    \caption{Correlation matrix of optimization objectives. The plot highlights strong inverse relationships between key objectives, particularly between actor satisfaction and ecological impact ($r = -1.0$), and between cooperation and economic outcome ($r = -0.7$). These correlations underscore the inherent trade-offs in the multi-objective optimization landscape.}
+    \label{fig:objectives_correlation}
+\end{figure}
+
+\begin{enumerate}
+
+    \item \textbf{Satisfaction--Ecology Tradeoff}  
+    
+    A strong negative correlation ($r = -1.0$) was observed between actor satisfaction and ecological impact, indicating a near-perfect inverse relationship. Policies that maximize user satisfaction, particularly for high-priority actors, consistently result in elevated ecological stress, highlighting the fundamental tension between user demands and environmental preservation.
+
+    \begin{itemize}
+        \item Increasing water availability or allocation flexibility during scarcity events consistently improved satisfaction across actor types but led to higher ecological degradation.
+        \item Emphasizing high-priority actor satisfaction skewed allocations, improving individual-level outcomes but intensifying overall environmental stress.
+        \item Policies that constrained resource distribution in order to preserve ecological thresholds yielded the lowest satisfaction levels but were the most effective in limiting ecological impact.
+        \item \textbf{Figure~\ref{fig:importance_satisfaction_ecology}} shows the hyperparameter importance plot. Priority weighting and crisis water thresholds emerge as the most influential parameters for this tradeoff, underscoring their central role in balancing satisfaction against ecological outcomes.
+    \end{itemize}
+
+    \item \textbf{Cooperation--Economy Link via Subvention}
+
+    A moderately strong negative correlation ($r = -0.7$) was observed between economic outcomes and cooperation, particularly under subvention-heavy policy regimes. While subventions enhance individual actor incentives and promote cooperative behavior, they may also reduce systemic economic efficiency by encouraging resource redistribution over true productivity gains.
+
+    \begin{itemize}
+        \item Subventions increased cooperation by improving short-term actor returns, but they did not significantly raise total system economic output.
+        \item Higher levels of cooperation under subsidy regimes often led to economic fragility and dependency, reducing long-term adaptability.
+        \item Economic benefits were concentrated among actors best positioned to leverage subventions, raising concerns about equity and structural bias.
+        \item \textbf{Figure~\ref{fig:importance_cooperation_economy}} illustrates that subvention-related hyperparameters are dominant drivers of cooperation. However, their marginal contribution to net economic outcomes highlights a potential misalignment in incentive structures.
+    \end{itemize}
+
+    \item \textbf{Diffusion of Cooperation Under Dissatisfaction}:  
+    When satisfaction is achieved, cooperation levels tend to stabilize around a compact distribution—typically centered near 0.5—indicating a balanced and cohesive system. However, in scenarios where satisfaction is low, cooperation becomes more diffuse and variable. This pattern suggests that dissatisfaction leads to fragmentation in cooperative behavior, potentially destabilizing system dynamics.  
+    The $policy_optimization$ notebook illustrates the difference in cooperation patterns between satisfied and unsatisfied regimes.
+\end{enumerate}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{./assets/images/optimization_hyp_importances_ecol.png}
+    \caption{Hyperparameter importance for the Ecological Objectives. Priority weights and water availability thresholds are key drivers of the ecological health.}
+    \label{fig:importance_satisfaction_ecology}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.7\textwidth]{./assets/images/optimization_hyp_importances_econ.png}
+    \caption{Hyperparameter importance for cooperation and economic outcomes. Subvention levels and cooperation thresholds strongly influence cooperation, while their economic effects are more diffuse.}
+    \label{fig:importance_cooperation_economy}
+\end{figure}
+
+\subsection{Post-Optimization Evaluation and Manual Selection}
+
+Following the optimization, the final run of the NSGA-II algorithm yielded a single non-dominated solution on the Pareto front. Due to the lack of multiple trade-off candidates, we manually selected and evaluated additional promising trials—specifically Trial 33, Trial 46, and a configuration derived from the best parameters of the \texttt{pol\_regulator} policy.
+
+These parameter sets were tested using the \texttt{multi\_scenario\_analysis} notebook to assess their performance across multiple objectives. To further refine outcomes, we manually adjusted some parameters to improve simulation results, focusing on satisfaction, economic impact, and ecological impact.
+
+Table~\ref{tab:manual_vs_optimized} presents a comparison of the evaluated parameter sets. Trial 33 demonstrated the most favorable balance, achieving absolute satisfaction while maintaining acceptable ecological and economic trade-offs. Based on this analysis, Trial 33 was selected as the final solution for submission.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{l|c|c|c|c}
+        % \toprule
+        \textbf{Parameter Set} & \textbf{Satisfaction} & \textbf{Violations} & \textbf{Economic Impact} & \textbf{Ecological Impact} \\ \hline
+        % \midrule
+        Trial 33 (\textit{best})           & \textbf{1.000 }  & 0              & \textbf{0.885}                   & \textbf{0.935 }                    \\
+        Trial 46                           & \textbf{1.000}   & 0              & 0.840                             & 0.941                     \\
+        % \bottomrule
+    \end{tabular}
+    \caption{Comparison of parameter sets based on key optimization objectives}
+    \label{tab:manual_vs_optimized}
+\end{table}
+
 \section{Conclusion}
-The policy optimization phase of the hackathon demonstrated the potential of machine learning and optimization techniques in addressing water resource management challenges. By leveraging predictive models and designing effective quota and incentives functions, it was possible to create a dynamic system that promotes sustainable water usage while ensuring that all users have access to the resources they need.
-The iterative nature of the optimization process allowed for continuous improvements, leading to a more efficient and effective water resource management strategy. The lessons learned from this phase will inform future efforts in water resource management and conservation.
+The optimization revealed fundamental trade-offs between actor satisfaction, ecological impact, cooperation, and economic outcomes. Notably, a perfect negative correlation between satisfaction and ecological health underscores the challenge of balancing human needs with environmental sustainability. Cooperation improves with higher subvention levels but exhibits a negative correlation with economic performance, suggesting diminishing returns and potential long-term fragility when over-reliant on subsidies.
+\\ \\
+A key behavioral insight is the pattern of cooperation relative to satisfaction: cooperation tends to concentrate around moderate levels (approximately 0.5) when satisfaction is high, indicating a stable and balanced system. In contrast, dissatisfaction leads to more diffuse and fragmented cooperation patterns, reflecting instability and less cohesive interactions.
+\\ \\
+These insights are further validated through detailed single scenario analyses, reinforcing the robustness of the observed trade-offs and behavioral dynamics. Overall, the study highlights the necessity for nuanced policy designs that carefully balance competing objectives and leverage evolutionary optimization to identify both effective solutions and meaningful system behaviors.
 \end{document}
